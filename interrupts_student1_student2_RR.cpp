@@ -7,74 +7,6 @@
 
 #include "interrupts_student1_student2.hpp"
 
-void RR(std::vector<PCB> &ready_queue,
-        PCB &running,
-        unsigned int &current_time,
-        std::vector<PCB> &wait_queue,
-        std::string &execution_status,
-        std::vector<PCB> &job_list)
-{
-    const int QUANTUM = 100;
-
-    // If CPU idle, dispatch next ready process
-    if (running.state == NOT_ASSIGNED && !ready_queue.empty()) 
-    {
-        running = ready_queue.front();
-        ready_queue.erase(ready_queue.begin());
-
-        execution_status += print_exec_status(current_time, running.PID, READY, RUNNING);
-        running.state = RUNNING;
-
-        sync_queue(job_list, running);
-    }
-
-    // No process running
-    if (running.state == NOT_ASSIGNED)
-        return;
-
-    // Run for quantum or less
-    int slice = std::min((int)running.remaining_time, QUANTUM);
-
-    running.remaining_time -= slice;
-    current_time += slice;
-
-    sync_queue(job_list, running);
-
-    // Process completes
-    if (running.remaining_time == 0) 
-    {
-        execution_status += print_exec_status(current_time, running.PID, RUNNING, TERMINATED);
-
-        free_memory(running);
-
-        running.state = TERMINATED;
-        sync_queue(job_list, running);
-
-        idle_CPU(running);
-        return;
-    }
-
-    // Preemption: quantum expired
-    execution_status += print_exec_status(current_time, running.PID, RUNNING, READY);
-
-    running.state = READY;
-
-    ready_queue.push_back(running);
-    sync_queue(job_list, running);
-
-    idle_CPU(running);
-}
-
-void FCFS(std::vector<PCB> &ready_queue) {
-    std::sort( 
-                ready_queue.begin(),
-                ready_queue.end(),
-                []( const PCB &first, const PCB &second ){
-                    return (first.arrival_time > second.arrival_time); 
-                } 
-            );
-}
-
 std::tuple<std::string /* add std::string for bonus mark */ > run_simulation(std::vector<PCB> list_processes) {
 
     std::vector<PCB> ready_queue;   //The ready queue of processes
@@ -84,6 +16,12 @@ std::tuple<std::string /* add std::string for bonus mark */ > run_simulation(std
                                     //see in questions. You don't need to use it, I put it here
                                     //to make the code easier :).
 
+    // We need to initialize job_list with the input processes
+    job_list = list_processes; 
+
+    // Track how long the current process has the CPU
+    int time_slice = 0;
+    
     unsigned int current_time = 0;
     PCB running;
 
@@ -97,36 +35,104 @@ std::tuple<std::string /* add std::string for bonus mark */ > run_simulation(std
 
     //Loop while till there are no ready or waiting processes.
     //This is the main reason I have job_list, you don't have to use it.
-    while(!all_process_terminated(job_list) || job_list.empty()) {
+    while(!all_process_terminated(job_list)) {
 
         //Inside this loop, there are three things you must do:
         // 1) Populate the ready queue with processes as they arrive
-        // 2) Manage the wait queue
-        // 3) Schedule processes from the ready queue
-
-        //Population of ready queue is given to you as an example.
-        //Go through the list of proceeses
-        for(auto &process : list_processes) {
-            if(process.arrival_time == current_time) {//check if the AT = current time
+        for(auto &process : job_list) {
+            // Check if the process arrived 
+            if(process.arrival_time <= current_time && (process.state == NEW || process.state == NOT_ASSIGNED)) {
                 //if so, assign memory and put the process into the ready queue
-                assign_memory(process);
+                if(assign_memory(process)){
+                    process.state = READY;  //Set the process state to READY
+                    ready_queue.push_back(process); //Add the process to the ready queue
+                    execution_status += print_exec_status(current_time, process.PID, NEW, READY);
+                } else {
+                    process.state = NEW;
+                }
+            }
+        }        
 
-                process.state = READY;  //Set the process state to READY
-                ready_queue.push_back(process); //Add the process to the ready queue
-                job_list.push_back(process); //Add it to the list of processes
+        // 2) Manage the wait queue
+        
+        for(int i = 0; i < wait_queue.size(); i++){
+            wait_queue[i].remaining_io_time--;
 
-                execution_status += print_exec_status(current_time, process.PID, NEW, READY);
+            if(wait_queue[i].remaining_io_time <= 0){
+                // I/O is finished, add to ready queue and update job_list
+                wait_queue[i].state = READY;
+                ready_queue.push_back(wait_queue[i]);
+                sync_queue(job_list, wait_queue[i]);
+
+                execution_status += print_exec_status(current_time, wait_queue[i].PID, WAITING, READY);
+
+                wait_queue.erase(wait_queue.begin() + i);
+                i--;
             }
         }
+        if (running.PID == -1){
+            if(!ready_queue.empty()){
+               
+                // Selecting the highest priority 
+                running = ready_queue.front();
+                ready_queue.erase(ready_queue.begin());
 
-        ///////////////////////MANAGE WAIT QUEUE/////////////////////////
-        //This mainly involves keeping track of how long a process must remain in the ready queue
+                running.state = RUNNING;
+                sync_queue(job_list, running);
 
-        /////////////////////////////////////////////////////////////////
+                execution_status += print_exec_status(current_time, running.PID, READY, RUNNING);
 
-        //////////////////////////SCHEDULER//////////////////////////////
-        RR(ready_queue, running, current_time, wait_queue, execution_status, job_list);
-        /////////////////////////////////////////////////////////////////
+                time_slice = 0;
+            }
+
+        }
+
+        // 3) Schedule processes from the ready queue
+        
+        // Execute CPU
+        if(running.PID != -1){
+            running.remaining_time--;
+            time_slice++;
+            // Check for processes termination
+            if(running.remaining_time <= 0){
+                running.state = TERMINATED;
+                free_memory(running);
+
+                sync_queue(job_list, running);
+                execution_status += print_exec_status(current_time + 1, running.PID, RUNNING, TERMINATED);
+                
+                idle_CPU(running);
+                time_slice = 0;
+            } else {
+                // Check for I/O request 
+                // Calculate how long the process has run
+                int time_processed = running.processing_time - running.remaining_time;
+                // Only trigger I/O if time is greater than 0 and it matches frequency interval
+                if(running.io_freq > 0 && time_processed > 0 && time_processed % running.io_freq == 0){
+                    running.state = WAITING;
+                    running.remaining_io_time = running.io_duration;
+
+                    wait_queue.push_back(running);
+                    sync_queue(job_list, running);
+
+                    execution_status += print_exec_status(current_time + 1, running.PID, RUNNING, WAITING);
+
+                    idle_CPU(running);
+                    time_slice = 0;
+                } else if (time_slice >= 100){
+                    // RR timeout (100ms)
+                    running.state = READY;
+                    ready_queue.push_back(running);
+                    sync_queue(job_list, running);
+                    execution_status += print_exec_status(current_time + 1, running.PID, RUNNING, READY);
+
+                    idle_CPU(running);
+                    time_slice = 0;
+                }
+            }
+
+        }
+        current_time++;
 
     }
     

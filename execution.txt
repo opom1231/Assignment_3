@@ -3,5 +3,15 @@
 +------------------------------------------------+
 |                 0 | 10 |       NEW |     READY |
 |                 0 | 10 |     READY |   RUNNING |
-|                10 | 10 |   RUNNING |TERMINATED |
+|                20 | 20 |       NEW |     READY |
+|               100 | 10 |   RUNNING |     READY |
+|               100 | 20 |     READY |   RUNNING |
+|               120 | 20 |   RUNNING |TERMINATED |
+|               120 | 30 |       NEW |     READY |
+|               120 | 10 |     READY |   RUNNING |
+|               140 | 10 |   RUNNING |TERMINATED |
+|               140 | 30 |     READY |   RUNNING |
+|               240 | 30 |   RUNNING |     READY |
+|               240 | 30 |     READY |   RUNNING |
+|               260 | 30 |   RUNNING |TERMINATED |
 +------------------------------------------------+
