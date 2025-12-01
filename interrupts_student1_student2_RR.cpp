@@ -5,7 +5,65 @@
  * 
  */
 
-#include<interrupts_student1_student2.hpp>
+#include "interrupts_student1_student2.hpp"
+
+void RR(std::vector<PCB> &ready_queue,
+        PCB &running,
+        unsigned int &current_time,
+        std::vector<PCB> &wait_queue,
+        std::string &execution_status,
+        std::vector<PCB> &job_list)
+{
+    const int QUANTUM = 100;
+
+    // If CPU idle, dispatch next ready process
+    if (running.state == NOT_ASSIGNED && !ready_queue.empty()) 
+    {
+        running = ready_queue.front();
+        ready_queue.erase(ready_queue.begin());
+
+        execution_status += print_exec_status(current_time, running.PID, READY, RUNNING);
+        running.state = RUNNING;
+
+        sync_queue(job_list, running);
+    }
+
+    // No process running
+    if (running.state == NOT_ASSIGNED)
+        return;
+
+    // Run for quantum or less
+    int slice = std::min((int)running.remaining_time, QUANTUM);
+
+    running.remaining_time -= slice;
+    current_time += slice;
+
+    sync_queue(job_list, running);
+
+    // Process completes
+    if (running.remaining_time == 0) 
+    {
+        execution_status += print_exec_status(current_time, running.PID, RUNNING, TERMINATED);
+
+        free_memory(running);
+
+        running.state = TERMINATED;
+        sync_queue(job_list, running);
+
+        idle_CPU(running);
+        return;
+    }
+
+    // Preemption: quantum expired
+    execution_status += print_exec_status(current_time, running.PID, RUNNING, READY);
+
+    running.state = READY;
+
+    ready_queue.push_back(running);
+    sync_queue(job_list, running);
+
+    idle_CPU(running);
+}
 
 void FCFS(std::vector<PCB> &ready_queue) {
     std::sort( 
@@ -67,7 +125,7 @@ std::tuple<std::string /* add std::string for bonus mark */ > run_simulation(std
         /////////////////////////////////////////////////////////////////
 
         //////////////////////////SCHEDULER//////////////////////////////
-        FCFS(ready_queue); //example of FCFS is shown here
+        RR(ready_queue, running, current_time, wait_queue, execution_status, job_list);
         /////////////////////////////////////////////////////////////////
 
     }
